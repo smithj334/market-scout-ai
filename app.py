@@ -37,13 +37,18 @@ prompt = ChatPromptTemplate.from_messages([
 agent = create_tool_calling_agent(llm, tools, prompt)
 agent_executor = AgentExecutor(agent=agent, tools=tools, verbose=True, handle_parsing_errors=True)
 
+# --- CACHING THE AI ENGINE ---
+# This saves the API response for 1 hour (3600 seconds) so you don't burn your free limits!
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_scout_report(ticker_symbol):
+    return agent_executor.invoke({"input": f"Analyze {ticker_symbol} and give me a recommendation."})
+
 # --- UI DESIGN ---
 st.set_page_config(page_title="Market Scout AI Terminal", layout="wide", page_icon="📈")
 st.title("🦅 Market Scout AI Terminal")
 
 ticker = st.text_input("Enter Ticker (e.g., TSLA, NVDA):").upper()
 
-# STEP 1: Professional Tab Layout
 tab1, tab2, tab3 = st.tabs(["📊 Market Report", "🤖 Chat with Scout", "⚡ Trade Desk"])
 
 # --- TAB 1: THE DASHBOARD ---
@@ -51,7 +56,8 @@ with tab1:
     if st.button("Scout Market") and ticker:
         with st.spinner(f"Scouting {ticker}... Analyzing charts and reading news..."):
             try:
-                response = agent_executor.invoke({"input": f"Analyze {ticker} and give me a recommendation."})
+                # WE CALL THE CACHED FUNCTION HERE INSTEAD OF THE AGENT DIRECTLY
+                response = fetch_scout_report(ticker)
                 
                 # Visual Metrics
                 hist = yf.Ticker(ticker).history(period="1mo")
@@ -90,29 +96,25 @@ with tab1:
                 else:
                     st.warning("The AI returned an empty response.")
                     
-                # Clean Expander for raw data
                 with st.expander("View Raw API Response"):
                     st.write(response)
 
             except Exception as e:
                 st.error(f"An error occurred: {e}")
 
-# --- TAB 2: EDUCATIONAL CHATBOT (Step 2) ---
+# --- TAB 2: EDUCATIONAL CHATBOT ---
 with tab2:
     st.markdown("### 🎓 Ask Scout Questions")
     if not st.session_state.latest_report:
         st.info("Generate a market report first so I have context to chat with you about!")
     else:
-        # Display chat history
         for msg in st.session_state.chat_messages:
             st.chat_message(msg["role"]).write(msg["content"])
             
-        # Chat input
         if user_query := st.chat_input("Ask a question about the report or trading terms..."):
             st.session_state.chat_messages.append({"role": "user", "content": user_query})
             st.chat_message("user").write(user_query)
             
-            # Simple LLM call using the report as context
             chat_context = f"You are Scout, an educational trading AI. Based on this recent report you wrote:\n\n{st.session_state.latest_report}\n\nAnswer the user's question simply and educationally: {user_query}"
             
             with st.spinner("Thinking..."):
@@ -122,7 +124,7 @@ with tab2:
                 st.session_state.chat_messages.append({"role": "assistant", "content": bot_reply})
                 st.chat_message("assistant").write(bot_reply)
 
-# --- TAB 3: TRADE EXECUTION (Step 3) ---
+# --- TAB 3: TRADE EXECUTION ---
 with tab3:
     st.markdown("### ⚡ Paper Trading Simulator")
     if not st.session_state.latest_report:
@@ -134,6 +136,5 @@ with tab3:
         shares = st.number_input("Number of Shares:", min_value=1, value=10)
         
         if st.button("Execute Simulated Trade"):
-            # This is where a Broker API (Robinhood, Alpaca, etc.) would go
             st.success(f"✅ Simulated Order Placed: {trade_action} {shares} shares of {ticker}.")
             st.info("Note: To trade real capital, you would connect a brokerage API here to replace this simulation logic.")
